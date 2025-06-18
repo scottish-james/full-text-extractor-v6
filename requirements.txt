@@ -1,0 +1,108 @@
+# Core Dependencies for Document to Markdown Converter
+# Updated for WSL 2 compatibility
+
+# Streamlit for web interface
+streamlit>=1.45.1
+altair==5.5.0
+blinker==1.9.0
+cachetools==5.5.2
+gitdb==4.0.12
+GitPython==3.1.44
+narwhals==1.40.0
+protobuf==6.31.0
+pyarrow==20.0.0
+pydeck==0.9.1
+tornado==6.5
+tzdata==2025.2
+
+# Anthropic SDK for Claude Sonnet 4
+anthropic==0.40.0
+
+# Document processing and conversion
+markitdown==0.1.1
+python-pptx==1.0.2
+PyMuPDF==1.25.5
+markdownify==1.1.0
+
+# File processing and utilities
+beautifulsoup4==4.13.4
+lxml==5.4.0
+pillow==11.2.1
+pandas==2.2.3
+numpy==2.2.6
+XlsxWriter==3.2.3
+
+# HTTP and networking
+requests==2.32.3
+urllib3==2.4.0
+certifi==2025.4.26
+charset-normalizer==3.4.2
+idna==3.10
+httpx==0.28.1
+httpcore==1.0.9
+h11==0.16.0
+anyio==4.9.0
+sniffio==1.3.1
+
+# JSON and data handling
+jsonschema==4.23.0
+jsonschema-specifications==2025.4.1
+jiter==0.10.0
+
+# Text and template processing
+Jinja2==3.1.6
+MarkupSafe==3.0.2
+soupsieve==2.7
+
+# System utilities
+click==8.2.1
+packaging==24.2
+python-dateutil==2.9.0.post0
+pytz==2025.2
+six==1.17.0
+toml==0.10.2
+tqdm==4.67.1
+
+# Type checking and validation
+annotated-types==0.7.0
+pydantic==2.11.4
+pydantic_core==2.33.2
+typing_extensions==4.13.2
+typing-inspection==0.4.0
+
+# Reference processing
+referencing==0.36.2
+rpds-py==0.25.1
+
+# Configuration and environment
+python-dotenv==1.1.0
+
+# Error handling and logging
+attrs==25.3.0
+exceptiongroup==1.3.0
+loguru==0.7.2
+
+# Math and computation
+mpmath==1.3.0
+sympy==1.14.0
+
+# AI and ML support (for magika file type detection)
+magika==0.6.2
+flatbuffers==25.2.10
+onnxruntime==1.22.0
+
+# Advanced processing
+tenacity==9.1.2
+distro==1.9.0
+coloredlogs==15.0.1
+humanfriendly==10.0
+
+# Optional: Enhanced Streamlit components
+streamlit-extras==0.4.7
+
+# Optional: For better clipboard functionality
+pyperclip==1.9.0
+
+# Optional: For async support in batch processing
+aiohttp==3.10.11
+asyncio-throttle==1.0.2
