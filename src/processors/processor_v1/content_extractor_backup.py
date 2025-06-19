@@ -1,6 +1,6 @@
 """
-Content Extractor - UPDATED: Now works with AccessibilityOrderExtractorV2
-Updated to accept pre-determined semantic roles instead of extracting from XML
+Content Extractor - ENHANCED: Now preserves meaningful alt text from images
+Updated to check for meaningful alt text before ignoring shapes
 """
 
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -11,39 +11,27 @@ import re
 class ContentExtractor:
     """
     Extracts content from various PowerPoint shape types with semantic role preservation.
-    UPDATED: Now accepts pre-determined semantic roles from AccessibilityOrderExtractorV2
+    ENHANCED: Now checks for meaningful alt text before deciding to ignore shapes.
     """
 
-    def extract_shape_content(self, shape, text_processor, accessibility_extractor=None, groups_already_expanded=False, semantic_role=None):
+    def extract_shape_content(self, shape, text_processor, accessibility_extractor=None, groups_already_expanded=False):
         """
         Main extraction router - delegates based on shape type and captures semantic role.
-        UPDATED: Now accepts semantic_role parameter instead of extracting from XML
+        ENHANCED: Now checks for meaningful alt text before ignoring shapes.
 
         Args:
-            shape: python-pptx Shape object
-            text_processor: TextProcessor instance for handling text
-            accessibility_extractor: AccessibilityOrderExtractor instance (optional)
             groups_already_expanded: If True, skip group processing as shapes already expanded
-            semantic_role: Pre-determined semantic role from AccessibilityOrderExtractorV2 (NEW)
         """
         # Capture basic shape info for diagram analysis
         shape_info = self._get_shape_analysis_info(shape)
 
-        # UPDATED: Use provided semantic role or fallback to XML extraction
-        if semantic_role is not None:
-            # Use the pre-determined role from AccessibilityOrderExtractorV2
-            final_semantic_role = semantic_role
-            print(f"DEBUG: Using provided semantic role: {semantic_role}")
-        else:
-            # Fallback to XML extraction for backward compatibility
-            final_semantic_role = "other"
-            if accessibility_extractor:
-                try:
-                    final_semantic_role = accessibility_extractor._get_semantic_role_from_xml(shape)
-                    print(f"DEBUG: Extracted semantic role from XML: {final_semantic_role}")
-                except Exception as e:
-                    print(f"DEBUG: Error getting semantic role from XML: {e}")
-            print(f"DEBUG: No semantic role provided, using fallback: {final_semantic_role}")
+        # Capture semantic role from XML analysis
+        semantic_role = "other"
+        if accessibility_extractor:
+            try:
+                semantic_role = accessibility_extractor._get_semantic_role_from_xml(shape)
+            except Exception as e:
+                print(f"DEBUG: Error getting semantic role: {e}")
 
         content_block = None
 
@@ -60,9 +48,9 @@ class ContentExtractor:
             elif hasattr(shape, 'has_chart') and shape.has_chart:
                 content_block = self.extract_chart(shape)
             elif shape_type_name == 'GROUP':
-                # UPDATED: Groups should rarely reach here with new extractor since they're expanded earlier
+                # CRITICAL FIX: Only process groups if they haven't been expanded already
                 if not groups_already_expanded:
-                    content_block = self.extract_group(shape, text_processor, accessibility_extractor, semantic_role)
+                    content_block = self.extract_group(shape, text_processor, accessibility_extractor)
                 else:
                     # Groups already expanded by accessibility extractor - skip to avoid double processing
                     print(f"DEBUG: Skipping group '{getattr(shape, 'name', 'unnamed')}' - already expanded")
@@ -91,69 +79,11 @@ class ContentExtractor:
         if content_block:
             try:
                 content_block.update(shape_info)
-                # UPDATED: Use the final determined semantic role
-                content_block["semantic_role"] = final_semantic_role
-                print(f"DEBUG: Added semantic role '{final_semantic_role}' to content block")
+                content_block["semantic_role"] = semantic_role
             except Exception as e:
                 print(f"Warning: Error adding shape info: {e}")
 
         return content_block
-
-    def extract_group(self, shape, text_processor, accessibility_extractor=None, semantic_role=None):
-        """
-        Extract content from grouped shapes using proper ordering.
-        UPDATED: Handle semantic role parameter for groups
-        """
-        try:
-            extracted_blocks = []
-
-            # UPDATED: Check if new extractor has the expected method
-            if accessibility_extractor and hasattr(accessibility_extractor, 'get_reading_order_of_grouped_shapes'):
-                print(f"DEBUG: Using accessibility extractor for group '{getattr(shape, 'name', 'unnamed')}' ordering")
-                ordered_children = accessibility_extractor.get_reading_order_of_grouped_shapes(shape)
-            elif accessibility_extractor and hasattr(accessibility_extractor, 'get_reading_order_of_grouped_by_shape'):
-                # Fallback to old method name if available
-                print(f"DEBUG: Using old method name for group ordering")
-                ordered_children = accessibility_extractor.get_reading_order_of_grouped_by_shape(shape)
-            else:
-                print(f"DEBUG: No accessibility extractor - using default group order")
-                ordered_children = list(shape.shapes)
-
-            print(f"DEBUG: Group has {len(ordered_children)} children")
-
-            # Process each child shape
-            for child_shape in ordered_children:
-                # For group children, we don't have individual semantic roles from the new extractor
-                # So we use None and let the content extractor determine them
-                child_block = self.extract_shape_content(
-                    child_shape,
-                    text_processor,
-                    accessibility_extractor,
-                    groups_already_expanded=False,  # Child shapes not pre-expanded
-                    semantic_role=None  # Let child shapes determine their own roles
-                )
-                if child_block:
-                    extracted_blocks.append(child_block)
-
-            # Return group container if any content was extracted
-            if extracted_blocks:
-                print(
-                    f"DEBUG: Group '{getattr(shape, 'name', 'unnamed')}' produced {len(extracted_blocks)} content blocks")
-                return {
-                    "type": "group",
-                    "extracted_blocks": extracted_blocks,
-                    "hyperlink": self._extract_shape_hyperlink(shape),
-                    "semantic_role": semantic_role if semantic_role else "group"  # UPDATED: Use provided role
-                }
-
-            print(f"DEBUG: Group '{getattr(shape, 'name', 'unnamed')}' produced no content")
-            return None
-
-        except Exception as e:
-            print(f"Error extracting group: {e}")
-            return None
-
-    # ... rest of the methods remain the same as they don't directly use semantic roles ...
 
     def _has_meaningful_alt_text(self, shape):
         """
@@ -298,6 +228,54 @@ class ContentExtractor:
             print(f"DEBUG: Error checking shape meaningfulness: {e}")
             # If we can't determine, err on the side of inclusion
             return True
+
+    def extract_group(self, shape, text_processor, accessibility_extractor=None):
+        """
+        Extract content from grouped shapes using proper ordering.
+        Only called when groups haven't been pre-expanded by accessibility extractor.
+        """
+        try:
+            extracted_blocks = []
+
+            # Use accessibility extractor for proper ordering if available
+            if accessibility_extractor:
+                print(f"DEBUG: Using accessibility extractor for group '{getattr(shape, 'name', 'unnamed')}' ordering")
+                ordered_children = accessibility_extractor.get_reading_order_of_grouped_by_shape(shape)
+            else:
+                print(f"DEBUG: No accessibility extractor - using default group order")
+                ordered_children = list(shape.shapes)
+
+            print(f"DEBUG: Group has {len(ordered_children)} children")
+
+            # Process each child shape
+            for child_shape in ordered_children:
+                # Recursively extract content from each child
+                child_block = self.extract_shape_content(
+                    child_shape,
+                    text_processor,
+                    accessibility_extractor,
+                    groups_already_expanded=False  # Child shapes not pre-expanded
+                )
+                if child_block:
+                    extracted_blocks.append(child_block)
+
+            # Return group container if any content was extracted
+            if extracted_blocks:
+                print(
+                    f"DEBUG: Group '{getattr(shape, 'name', 'unnamed')}' produced {len(extracted_blocks)} content blocks")
+                return {
+                    "type": "group",
+                    "extracted_blocks": extracted_blocks,
+                    "hyperlink": self._extract_shape_hyperlink(shape),
+                    "semantic_role": "group"
+                }
+
+            print(f"DEBUG: Group '{getattr(shape, 'name', 'unnamed')}' produced no content")
+            return None
+
+        except Exception as e:
+            print(f"Error extracting group: {e}")
+            return None
 
     def extract_image(self, shape):
         """Extract image information with comprehensive alt text detection."""
@@ -561,3 +539,4 @@ class ContentExtractor:
                 return f"https://{url}"
 
         return url
+

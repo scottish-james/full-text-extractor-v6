@@ -5,6 +5,8 @@ Key fixes:
 2. More selective XML element processing
 3. Better shape tree navigation
 4. Improved debugging to track duplicates
+5. FIXED: Proper class definition to resolve import errors
+6. FIXED: Recursive shape discovery for nested groups
 """
 
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -13,6 +15,12 @@ import re
 
 
 class AccessibilityOrderExtractor:
+    """
+    Extracts shapes in proper reading order with duplicate elimination.
+    FIXED: Proper class structure to resolve import issues.
+    FIXED: Recursive shape discovery for nested groups.
+    """
+
     def __init__(self, use_accessibility_order=True):
         self.use_accessibility_order = use_accessibility_order
         self.last_extraction_method = "not_extracted"
@@ -132,7 +140,7 @@ class AccessibilityOrderExtractor:
         result = title_shapes + subtitle_shapes + content_shapes + other_shapes
         print(f"DEBUG: Final semantic order: {len(result)} shapes")
 
-        return deduplicated_shapes
+        return result
 
     def _get_xml_document_order_deduplicated(self, slide):
         """
@@ -156,6 +164,7 @@ class AccessibilityOrderExtractor:
     def _parse_slide_xml_for_document_order_deduplicated(self, slide_xml):
         """
         FIXED: Parse slide XML with deduplication by shape ID.
+        Now includes recursive shape discovery for nested groups.
         """
         root = ET.fromstring(slide_xml)
 
@@ -173,11 +182,15 @@ class AccessibilityOrderExtractor:
 
         print(f"DEBUG: Processing shape tree with {len(list(shape_tree))} direct children")
 
-        # Process ONLY direct children of the shape tree to avoid nested duplicates
-        for idx, elem in enumerate(shape_tree):
+        # FIXED: Use recursive discovery instead of just direct children
+        all_shape_elements = self._find_all_shapes_recursively(shape_tree)
+        print(f"DEBUG: Found {len(all_shape_elements)} total shapes (including nested)")
+
+        # Process all discovered shapes in order
+        for idx, elem in enumerate(all_shape_elements):
             tag_name = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
 
-            # Only process actual shape elements at the top level
+            # Only process actual shape elements
             if tag_name in ['sp', 'pic', 'graphicFrame', 'grpSp', 'cxnSp']:
                 shape_info = self._extract_shape_info_from_xml(elem, idx)
 
@@ -198,6 +211,30 @@ class AccessibilityOrderExtractor:
 
         print(f"DEBUG: Final unique shapes after XML deduplication: {len(shape_order_info)}")
         return shape_order_info
+
+    def _find_all_shapes_recursively(self, parent_element):
+        """
+        NEW METHOD: Recursively find all shape elements, including those in nested groups.
+        This ensures we don't miss shapes that are nested deep in group hierarchies.
+        """
+        all_shapes = []
+
+        def recurse_find_shapes(element):
+            tag_name = element.tag.split('}')[-1] if '}' in element.tag else element.tag
+
+            # If this is a shape element, add it to our collection
+            if tag_name in ['sp', 'pic', 'graphicFrame', 'grpSp', 'cxnSp']:
+                all_shapes.append(element)
+
+            # Recurse into children to find nested shapes
+            for child in element:
+                recurse_find_shapes(child)
+
+        # Start recursion from the parent element
+        recurse_find_shapes(parent_element)
+
+        print(f"DEBUG: Recursive discovery found {len(all_shapes)} shape elements")
+        return all_shapes
 
     def _map_xml_to_pptx_shapes_deduplicated(self, xml_shape_info, pptx_shapes):
         """
@@ -271,7 +308,6 @@ class AccessibilityOrderExtractor:
 
         return deduplicated
 
-    # [Include all the other existing methods from the original class]
     def _has_xml_access(self, slide):
         """XML availability check with multiple access pattern attempts."""
         try:
@@ -593,7 +629,6 @@ class AccessibilityOrderExtractor:
 
         return ordered_children
 
-    # Add all missing helper methods for completeness
     def _validate_title_from_xml_content(self, xml_root):
         """Validate title candidate using XML text content analysis."""
         try:

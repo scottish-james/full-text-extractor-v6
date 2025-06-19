@@ -40,7 +40,8 @@ DESIGN PATTERNS:
 
 # Import all component classes with clear separation of concerns
 from .powerpoint_processor import PowerPointProcessor
-from .accessibility_extractor import AccessibilityOrderExtractor
+# from .accessibility_extractor import AccessibilityOrderExtractor
+from .accessibility_extractor_v2 import AccessibilityOrderExtractorV2 as AccessibilityOrderExtractor
 from .content_extractor import ContentExtractor
 from .text_processor import TextProcessor
 from .diagram_analyzer import DiagramAnalyzer
