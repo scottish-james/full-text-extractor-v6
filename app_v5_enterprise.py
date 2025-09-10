@@ -524,26 +524,39 @@ def load_enterprise_config():
     """Load enterprise LLM configuration from files or environment."""
     jwt_token = None
     model_url = None
+    config_status = {}
 
     # Try to load from files first
     try:
         if os.path.exists("JWT_token.txt"):
             with open("JWT_token.txt", "r") as f:
                 jwt_token = f.read().strip()
+                config_status["JWT Token"] = "✅ Loaded from JWT_token.txt"
+        else:
+            config_status["JWT Token"] = "❌ JWT_token.txt not found"
 
         if os.path.exists("model_url.txt"):
             with open("model_url.txt", "r") as f:
                 model_url = f.read().strip()
+                config_status["Model URL"] = "✅ Loaded from model_url.txt"
+        else:
+            config_status["Model URL"] = "❌ model_url.txt not found"
     except Exception as e:
         st.warning(f"Could not read config files: {e}")
+        config_status["File Error"] = f"⚠️ Error reading files: {e}"
 
     # Fall back to environment variables
     if not jwt_token:
         jwt_token = os.getenv("ENTERPRISE_JWT_TOKEN")
+        if jwt_token:
+            config_status["JWT Token"] = "✅ Loaded from environment variable"
+
     if not model_url:
         model_url = os.getenv("ENTERPRISE_MODEL_URL")
+        if model_url:
+            config_status["Model URL"] = "✅ Loaded from environment variable"
 
-    return jwt_token, model_url
+    return jwt_token, model_url, config_status
 
 
 def convert_file_enhanced(uploaded_file, use_vision: bool, jwt_token: str, model_url: str):
@@ -798,7 +811,7 @@ def main():
         st.markdown(f"**Selected:** {uploaded_file.name} ({uploaded_file.size:,} bytes)")
 
         if st.button("🚀 Convert to Markdown", type="primary"):
-            convert_file_enhanced(uploaded_file, use_vision)
+            convert_file_enhanced(uploaded_file, use_vision, jwt_token, model_url)
 
     # Show output
     render_output()
