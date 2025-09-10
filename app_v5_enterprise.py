@@ -751,60 +751,43 @@ def main():
     st.markdown("---")
 
     # Configuration section
-    st.markdown("### ⚙️ Enterprise Configuration")
+    st.markdown("### ⚙️ Configuration")
 
-    # Load existing configuration
-    existing_jwt, existing_url = load_enterprise_config()
+    # Load and display Enterprise LLM configuration status
+    jwt_token, model_url, config_status = load_enterprise_config()
+
+    # Configuration status display
+    with st.expander("🏢 Enterprise LLM Configuration Status", expanded=True):
+        for key, status in config_status.items():
+            st.markdown(f"**{status}**")
+
+        if jwt_token and model_url:
+            st.success("✅ Enterprise LLM configuration is complete")
+        else:
+            st.error("❌ Enterprise LLM configuration incomplete")
+            st.markdown("""
+            **Required files:**
+            - `JWT_token.txt` (containing your JWT authentication token)
+            - `model_url.txt` (containing the Enterprise LLM endpoint URL)
+
+            **Alternative:** Set environment variables:
+            - `ENTERPRISE_JWT_TOKEN`
+            - `ENTERPRISE_MODEL_URL`
+            """)
 
     col1, col2 = st.columns(2)
 
     with col1:
         use_vision = st.checkbox(
             "🤖 Use Enterprise Vision Processing",
-            value=True,
+            value=bool(jwt_token and model_url),
+            disabled=not (jwt_token and model_url),
             help="Process document images with Enterprise LLM Vision API for better formatting"
         )
 
     with col2:
-        if existing_jwt:
-            masked_token = f"{existing_jwt[:10]}..." if len(existing_jwt) > 10 else "***"
-            st.info(f"✅ JWT Token loaded: {masked_token}")
-        if existing_url:
-            st.info(f"✅ Model URL loaded: {existing_url[:50]}...")
-
-    if use_vision:
-        st.markdown("#### Enterprise LLM Credentials")
-
-        # Allow override of loaded config
-        jwt_token = st.text_input(
-            "JWT Token",
-            type="password",
-            placeholder="Enter JWT token or leave empty to use config file",
-            help="JWT authentication token for Enterprise LLM"
-        ) or existing_jwt
-
-        model_url = st.text_input(
-            "Model Endpoint URL",
-            placeholder="Enter model URL or leave empty to use config file",
-            help="Enterprise LLM endpoint URL"
-        ) or existing_url
-
-        if not jwt_token or not model_url:
-            st.warning(
-                "⚠️ Please provide Enterprise LLM credentials or ensure JWT_token.txt and model_url.txt files exist")
-            st.info("""
-            **Configuration Options:**
-            1. Enter credentials above, or
-            2. Create these files in the same directory:
-               - `JWT_token.txt` (containing your JWT token)
-               - `model_url.txt` (containing the model endpoint URL)
-            3. Set environment variables:
-               - `ENTERPRISE_JWT_TOKEN`
-               - `ENTERPRISE_MODEL_URL`
-            """)
-    else:
-        jwt_token = None
-        model_url = None
+        if not (jwt_token and model_url):
+            st.warning("⚠️ Enterprise LLM credentials required for vision processing")
 
     st.markdown("---")
 
@@ -815,10 +798,7 @@ def main():
         st.markdown(f"**Selected:** {uploaded_file.name} ({uploaded_file.size:,} bytes)")
 
         if st.button("🚀 Convert to Markdown", type="primary"):
-            if use_vision and (not jwt_token or not model_url):
-                st.error("Please provide Enterprise LLM credentials for vision processing")
-            else:
-                convert_file_enhanced(uploaded_file, use_vision, jwt_token, model_url)
+            convert_file_enhanced(uploaded_file, use_vision)
 
     # Show output
     render_output()
@@ -826,4 +806,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
