@@ -1,7 +1,8 @@
 """
-Document to Markdown Converter - Enhanced with Smart Hyperlink Integration
-Enterprise LLM Version
+DocFlow Vision - Enterprise Edition
+Document to Markdown Converter with Smart Hyperlink Integration
 Created by James Taylor
+Version 6.0 - Clean Rewrite with Enhanced Error Handling
 """
 
 import streamlit as st
@@ -15,6 +16,12 @@ from io import BytesIO
 from typing import List, Dict, Optional, Tuple
 import logging
 import requests
+import json
+from datetime import datetime
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Import your existing converters
 try:
@@ -23,6 +30,7 @@ try:
     CONVERTER_AVAILABLE = True
 except ImportError:
     CONVERTER_AVAILABLE = False
+    logger.warning("File converter not available")
 
 # Import DocVision components
 try:
@@ -32,279 +40,242 @@ try:
     DOCVISION_AVAILABLE = True
 except ImportError:
     DOCVISION_AVAILABLE = False
-
-
-def setup_minimal_styling():
-    """Clean, dark-mode friendly styling."""
-    st.markdown("""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap');
-
-    /* Hide Streamlit elements */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-
-    /* Global styling */
-    .stApp {
-        font-family: 'JetBrains Mono', monospace;
-    }
-
-    /* Container */
-    .main .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        max-width: 800px;
-    }
-
-    /* Hero section */
-    .hero {
-        text-align: center;
-        padding: 3rem 0;
-        margin-bottom: 3rem;
-    }
-
-    .hero h1 {
-        font-size: 2.5rem;
-        font-weight: 300;
-        margin-bottom: 0.5rem;
-        color: var(--text-color);
-    }
-
-    .hero p {
-        font-size: 1.1rem;
-        opacity: 0.8;
-        margin-bottom: 2rem;
-    }
-
-    .credit {
-        font-size: 0.9rem;
-        opacity: 0.6;
-        margin-top: 1rem;
-    }
-
-    /* Card styling */
-    .upload-card {
-        background: var(--background-color);
-        border: 1px solid var(--border-color);
-        border-radius: 12px;
-        padding: 2rem;
-        margin: 2rem 0;
-    }
-
-    /* Button styling */
-    .stButton > button {
-        width: 100%;
-        height: 3rem;
-        border-radius: 8px;
-        font-family: 'JetBrains Mono', monospace;
-        font-weight: 500;
-        border: none;
-        background: #4CAF50;
-        color: white;
-        transition: all 0.2s ease;
-    }
-
-    .stButton > button:hover {
-        background: #45a049;
-        transform: translateY(-1px);
-    }
-
-    /* Output section */
-    .output-section {
-        margin-top: 3rem;
-        padding-top: 2rem;
-        border-top: 1px solid var(--border-color);
-    }
-
-    /* Status styling */
-    .status-card {
-        background: var(--secondary-background-color);
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-
-    /* Dark mode variables */
-    [data-theme="dark"] {
-        --text-color: #ffffff;
-        --background-color: #1e1e1e;
-        --secondary-background-color: #2d2d2d;
-        --border-color: #404040;
-    }
-
-    /* Light mode variables */
-    [data-theme="light"] {
-        --text-color: #000000;
-        --background-color: #ffffff;
-        --secondary-background-color: #f8f9fa;
-        --border-color: #e0e0e0;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-
-def initialize_session():
-    """Initialize session state."""
-    if "markdown_content" not in st.session_state:
-        st.session_state.markdown_content = ""
-    if "file_name" not in st.session_state:
-        st.session_state.file_name = ""
-    if "extracted_hyperlinks" not in st.session_state:
-        st.session_state.extracted_hyperlinks = []
-    if "xml_markdown" not in st.session_state:
-        st.session_state.xml_markdown = ""
-    if "vision_enhanced" not in st.session_state:
-        st.session_state.vision_enhanced = False
-
-
-def render_hero():
-    """Simple hero section."""
-    st.markdown("""
-    <div class="hero">
-        <h1>DocFlow Vision</h1>
-        <p>AI-powered document conversion with smart hyperlink preservation</p>
-        <div class="credit">Created by James Taylor - Enterprise Edition</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-def extract_hyperlinks_from_markdown(markdown_content):
-    """
-    Extract all hyperlinks from markdown content.
-    Returns: list of dicts with Link Text, URL, and Slide Number
-    """
-    if not markdown_content:
-        return []
-
-    hyperlinks = []
-    current_slide = 1
-
-    lines = markdown_content.split('\n')
-
-    for line in lines:
-        # Track slide numbers from HTML comments or slide markers
-        slide_comment_match = re.search(r'<!--\s*Slide\s*(\d+)\s*-->', line)
-        if slide_comment_match:
-            current_slide = int(slide_comment_match.group(1))
-            continue
-
-        # Also check for "Slide X" in headers
-        slide_header_match = re.search(r'^#+\s*Slide\s*(\d+)', line)
-        if slide_header_match:
-            current_slide = int(slide_header_match.group(1))
-
-        # Find all markdown links in the line
-        link_pattern = r'\[([^\]]+)\]\(([^)]+)\)'
-        matches = re.finditer(link_pattern, line)
-
-        for match in matches:
-            link_text = match.group(1)
-            link_url = match.group(2)
-
-            # Clean up the link text
-            clean_text = re.sub(r'\*{1,3}', '', link_text).strip()
-
-            # Skip image links and placeholders
-            if clean_text.startswith('!') or link_url == "image":
-                continue
-
-            hyperlinks.append({
-                'Link Text': clean_text,
-                'URL': link_url,
-                'Slide Number': current_slide
-            })
-
-    return hyperlinks
-
-
-def create_enhanced_prompt_for_slide(slide_number: int, hyperlinks_df: pd.DataFrame) -> str:
-    """
-    Create an enhanced prompt for a specific slide if it has hyperlinks.
-
-    Args:
-        slide_number: The slide number being processed
-        hyperlinks_df: DataFrame containing all hyperlinks
-
-    Returns:
-        Enhanced prompt string or None if no hyperlinks for this slide
-    """
-    # Filter for this slide's hyperlinks
-    slide_links = hyperlinks_df[hyperlinks_df['Slide Number'] == slide_number]
-
-    if slide_links.empty:
-        return None
-
-    # Build the hyperlink instruction
-    link_instructions = []
-    for _, row in slide_links.iterrows():
-        link_instructions.append(f'[{row["Link Text"]}]({row["URL"]})')
-
-    enhanced_instruction = f"""
-
-IMPORTANT: This slide contains the following hyperlinks that must be preserved exactly:
-{', '.join(link_instructions)}
-
-Please ensure these hyperlinks are added appropriately in the markdown output where the link text appears.
-"""
-
-    return enhanced_instruction
+    logger.warning("DocVision dependencies not available")
 
 
 class EnterpriseLLMClient:
-    """Client for connecting to enterprise LLM endpoints."""
+    """Client for connecting to enterprise LLM endpoints with comprehensive error handling."""
 
     def __init__(self, jwt_token: str, model_url: str):
-        """
-        Initialise enterprise LLM client.
-
-        Args:
-            jwt_token: JWT authentication token
-            model_url: Enterprise model endpoint URL
-        """
+        """Initialize the Enterprise LLM client."""
         self.jwt_token = jwt_token
         self.model_url = model_url
         self.headers = {
             "Authorization": f"Bearer {self.jwt_token}",
             "Content-Type": "application/json"
         }
-        self.logger = logging.getLogger(__name__)
 
-    def test_connection(self) -> bool:
-        """Test connectivity to the enterprise endpoint."""
+    def validate_configuration(self) -> Tuple[bool, List[str]]:
+        """
+        Validate the configuration before attempting connection.
+        Returns: (is_valid, list_of_errors)
+        """
+        errors = []
+
+        if not self.jwt_token:
+            errors.append("JWT token is missing")
+        elif len(self.jwt_token) < 10:
+            errors.append("JWT token appears to be too short")
+
+        if not self.model_url:
+            errors.append("Model URL is missing")
+        elif not self.model_url.startswith(('http://', 'https://')):
+            errors.append(f"Model URL must start with http:// or https:// (current: {self.model_url})")
+
+        return len(errors) == 0, errors
+
+    def test_connection_detailed(self) -> Dict:
+        """
+        Comprehensive connection test with multiple fallback methods.
+        Returns detailed diagnostic information.
+        """
+        result = {
+            "success": False,
+            "method": None,
+            "status_code": None,
+            "error": None,
+            "error_type": None,
+            "suggestions": [],
+            "timestamp": datetime.now().isoformat(),
+            "url": self.model_url,
+            "headers_sent": {k: v[:20] + "..." if len(v) > 20 else v for k, v in self.headers.items()}
+        }
+
+        # First validate configuration
+        is_valid, config_errors = self.validate_configuration()
+        if not is_valid:
+            result["error"] = "Configuration validation failed"
+            result["error_type"] = "CONFIG_ERROR"
+            result["suggestions"] = config_errors
+            return result
+
+        # Test methods in order of preference
+        test_methods = [
+            ("POST", self._test_post_request),
+            ("GET", self._test_get_request),
+            ("HEAD", self._test_head_request),
+            ("OPTIONS", self._test_options_request)
+        ]
+
+        for method_name, test_func in test_methods:
+            try:
+                success, status_code, error_msg = test_func()
+                if success:
+                    result["success"] = True
+                    result["method"] = method_name
+                    result["status_code"] = status_code
+                    return result
+                else:
+                    # Store the best error we've seen
+                    if status_code:
+                        result["status_code"] = status_code
+                        result["method"] = method_name
+                        result["error"] = error_msg
+                        result["error_type"] = self._classify_error(status_code)
+                        result["suggestions"] = self._get_suggestions(status_code, error_msg)
+
+                        # If we got a definitive error (4xx), stop trying
+                        if 400 <= status_code < 500:
+                            return result
+            except Exception as e:
+                logger.debug(f"Method {method_name} failed: {str(e)}")
+                continue
+
+        # If no method worked and we don't have a specific error
+        if not result["error"]:
+            result["error"] = "Could not connect to the Enterprise LLM endpoint"
+            result["error_type"] = "CONNECTION_ERROR"
+            result["suggestions"] = [
+                "Check if the URL is accessible from your network",
+                "Verify firewall or proxy settings",
+                "Ensure the server is running and accepting connections",
+                "Try accessing the URL directly in a browser to test connectivity"
+            ]
+
+        return result
+
+    def _test_post_request(self) -> Tuple[bool, Optional[int], Optional[str]]:
+        """Test with a minimal POST request."""
         try:
-            response = requests.head(self.model_url, timeout=10)
-            return response.status_code < 400
+            test_payload = {
+                "messages": [{"role": "user", "content": "test"}],
+                "max_tokens": 1,
+                "temperature": 0
+            }
+            response = requests.post(
+                self.model_url,
+                headers=self.headers,
+                json=test_payload,
+                timeout=15
+            )
+            return response.status_code < 400, response.status_code, response.text[:500] if response.text else None
+        except requests.exceptions.Timeout:
+            return False, None, "Request timed out"
+        except requests.exceptions.ConnectionError as e:
+            return False, None, f"Connection error: {str(e)}"
         except Exception as e:
-            st.error(f"Enterprise endpoint test failed: {e}")
-            return False
+            return False, None, str(e)
+
+    def _test_get_request(self) -> Tuple[bool, Optional[int], Optional[str]]:
+        """Test with a GET request."""
+        try:
+            response = requests.get(
+                self.model_url,
+                headers=self.headers,
+                timeout=10
+            )
+            return response.status_code < 400, response.status_code, response.text[:500] if response.text else None
+        except Exception as e:
+            return False, None, str(e)
+
+    def _test_head_request(self) -> Tuple[bool, Optional[int], Optional[str]]:
+        """Test with a HEAD request."""
+        try:
+            response = requests.head(
+                self.model_url,
+                headers=self.headers,
+                timeout=10
+            )
+            return response.status_code < 400, response.status_code, None
+        except Exception as e:
+            return False, None, str(e)
+
+    def _test_options_request(self) -> Tuple[bool, Optional[int], Optional[str]]:
+        """Test with an OPTIONS request."""
+        try:
+            response = requests.options(
+                self.model_url,
+                headers=self.headers,
+                timeout=10
+            )
+            return response.status_code < 400, response.status_code, None
+        except Exception as e:
+            return False, None, str(e)
+
+    def _classify_error(self, status_code: int) -> str:
+        """Classify the error based on status code."""
+        if status_code == 401:
+            return "AUTHENTICATION_ERROR"
+        elif status_code == 403:
+            return "PERMISSION_ERROR"
+        elif status_code == 404:
+            return "ENDPOINT_NOT_FOUND"
+        elif status_code == 405:
+            return "METHOD_NOT_ALLOWED"
+        elif status_code >= 500:
+            return "SERVER_ERROR"
+        elif status_code >= 400:
+            return "CLIENT_ERROR"
+        else:
+            return "UNKNOWN_ERROR"
+
+    def _get_suggestions(self, status_code: int, error_msg: str) -> List[str]:
+        """Get specific suggestions based on the error."""
+        suggestions = []
+
+        if status_code == 401:
+            suggestions.extend([
+                "Check if your JWT token is valid and not expired",
+                "Verify the token format (some APIs need 'Bearer ' prefix, others don't)",
+                "Try regenerating your authentication token",
+                "Ensure the token has the necessary scopes/permissions"
+            ])
+        elif status_code == 403:
+            suggestions.extend([
+                "Your token lacks the required permissions",
+                "Contact your administrator to grant necessary access",
+                "Check if your account has access to this specific endpoint"
+            ])
+        elif status_code == 404:
+            suggestions.extend([
+                "Verify the endpoint URL is correct",
+                "Common endpoints: /v1/chat/completions, /v1/completions, /chat/completions",
+                "Check API documentation for the correct path",
+                "Ensure you're not missing a required path segment"
+            ])
+        elif status_code == 405:
+            suggestions.extend([
+                "The endpoint exists but doesn't accept this HTTP method",
+                "This often means the URL is correct but needs POST instead of GET",
+                "Check API documentation for required HTTP methods"
+            ])
+        elif status_code >= 500:
+            suggestions.extend([
+                "The server is experiencing issues",
+                "Try again in a few moments",
+                "Contact your system administrator if the problem persists",
+                "Check service status page if available"
+            ])
+
+        return suggestions
 
     def extract_text_from_image(self, image: Image.Image, prompt: str) -> Optional[str]:
-        """
-        Extract text from image using enterprise LLM.
-
-        Args:
-            image: PIL Image object
-            prompt: System prompt for processing
-
-        Returns:
-            Extracted text or None if failed
-        """
+        """Extract text from image using enterprise LLM."""
         try:
-            # Convert image to base64
+            # Prepare image
             buffer = BytesIO()
-            image.save(buffer, format='PNG', optimize=True)
+            image.save(buffer, format='PNG', optimize=True, quality=85)
             image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
-            # Prepare payload for enterprise LLM
+            # Prepare payload
             payload = {
                 "messages": [
                     {"role": "system", "content": prompt},
-                    {"role": "user", "content": f"Convert this image to Markdown:\n[Image attached]"}
+                    {"role": "user", "content": "Convert this image to Markdown:\n[Image attached]"}
                 ],
                 "max_tokens": 4000,
                 "temperature": 0.1,
-                "image_data": image_b64  # Custom field for enterprise endpoint
+                "image_data": image_b64
             }
 
             # Make request
@@ -325,108 +296,108 @@ class EnterpriseLLMClient:
                     return result["generated_text"]
                 elif "content" in result:
                     return result["content"]
+                elif "response" in result:
+                    return result["response"]
                 else:
+                    logger.warning(f"Unexpected response format: {result.keys()}")
                     return str(result)
             else:
-                st.error(f"Enterprise LLM error {response.status_code}: {response.text}")
+                logger.error(f"LLM request failed with status {response.status_code}")
                 return None
 
         except Exception as e:
-            st.error(f"Enterprise LLM request failed: {e}")
+            logger.error(f"Error in extract_text_from_image: {str(e)}")
             return None
 
 
 class EnhancedDocVision:
-    """Extended DocVision class with hyperlink-aware processing using Enterprise LLM."""
+    """Document vision processor with hyperlink awareness."""
 
     def __init__(self, jwt_token: str, model_url: str):
         """Initialize with Enterprise LLM credentials."""
-        if not jwt_token or not model_url:
-            raise ValueError("Enterprise LLM JWT token and model URL are required for vision processing")
-
         self.client = EnterpriseLLMClient(jwt_token, model_url)
-        self.base_prompt = """You are a PowerPoint slide to Markdown converter. You receive an image of a PowerPoint slide and must convert all 
-visible text and structure into clean, professional markdown.
+        self.base_prompt = self._get_base_prompt()
 
-Your job:
-1. Extract ALL text content from the slide
-2. Identify the main title and format as # header (only ONE per slide)
-3. Identify subtitles or section headers and format as ### headers
-4. Convert bullet points to proper markdown lists with correct indentation (use 2 spaces for nested bullets)
+    def _get_base_prompt(self) -> str:
+        """Get the base prompt for slide conversion."""
+        return """You are a PowerPoint slide to Markdown converter. Convert the image to clean markdown.
+
+REQUIREMENTS:
+1. Extract ALL visible text from the slide
+2. Use # for the main title (only ONE per slide)
+3. Use ### for subtitles/section headers (not ##)
+4. Convert bullet points to markdown lists with proper indentation
 5. Preserve table structures using markdown table syntax
-6. Extract and format any numbered lists
-7. Maintain slide hierarchy and structure
-8. Include any visible links, captions, or annotations
-9. Format code blocks or technical content appropriately
-10. If there are diagrams then create them in mermaid code format that can be used in a .md file. Diagrams will have 
-text boxes and arrows. If you only see text boxes but no lines or arrows this is NOT a diagram. THEREFORE IT MUST 
-HAVE LINES BETWEEN TEXT BOX. If not just extract text. 
+6. Maintain the slide's logical structure
+7. Include any visible links, captions, or annotations
+8. For diagrams with text boxes AND connecting lines/arrows, create mermaid diagrams
+9. If only text boxes without connections, just extract the text
 
-Key Rules:
-- Extract ALL visible text - don't miss anything
-- Each slide should have only ONE main # heading
-- Use ### for subheadings (not ##)
-- Use proper markdown syntax throughout
-- Maintain the original slide's logical structure
-- If text is unclear, make your best reasonable interpretation
-- Don't add content that isn't visible in the image
-- Format tables properly with | separators
-- Preserve bullet point hierarchies with proper indentation
-
-Output clean, readable markdown that captures everything visible on the slide.
-
-Finally - all this output is going to an .md file so you DO NOT NEED to put ```markdown ARE WE CLEAR"""
+OUTPUT FORMAT:
+- Clean markdown without code block markers
+- Ready for direct use in .md files
+- No ```markdown tags needed"""
 
     def process_with_hyperlinks(self, file_path: Path, hyperlinks_df: pd.DataFrame) -> str:
-        """
-        Process a document with hyperlink awareness.
-
-        Args:
-            file_path: Path to the document
-            hyperlinks_df: DataFrame containing hyperlink information
-
-        Returns:
-            Markdown content with correct hyperlinks
-        """
-        # Convert to images first
-        if file_path.suffix.lower() == '.pdf':
-            images = self._pdf_to_images(file_path)
-        elif file_path.suffix.lower() in ['.pptx', '.ppt']:
-            images = self._powerpoint_to_images(file_path)
-        else:
-            raise ValueError(f"Unsupported file type: {file_path.suffix}")
-
-        # Process each slide/page
-        markdown_sections = []
-
-        for i, image in enumerate(images, 1):
-            # Check if this slide has hyperlinks
-            enhanced_instruction = create_enhanced_prompt_for_slide(i, hyperlinks_df)
-
-            # Build the prompt
-            if enhanced_instruction:
-                prompt = self.base_prompt + enhanced_instruction
-                st.info(
-                    f"📎 Slide {i}: Processing with {len(hyperlinks_df[hyperlinks_df['Slide Number'] == i])} hyperlinks")
+        """Process document with hyperlink preservation."""
+        try:
+            # Convert to images
+            if file_path.suffix.lower() == '.pdf':
+                images = self._pdf_to_images(file_path)
+            elif file_path.suffix.lower() in ['.pptx', '.ppt']:
+                images = self._powerpoint_to_images(file_path)
             else:
+                raise ValueError(f"Unsupported file type: {file_path.suffix}")
+
+            if not images:
+                return "# Error\n\nCould not convert document to images."
+
+            # Process each slide
+            markdown_sections = []
+            progress_bar = st.progress(0)
+
+            for i, image in enumerate(images, 1):
+                progress_bar.progress(i / len(images))
+
+                # Check for hyperlinks on this slide
+                slide_links = hyperlinks_df[
+                    hyperlinks_df['Slide Number'] == i] if not hyperlinks_df.empty else pd.DataFrame()
+
+                # Build prompt
                 prompt = self.base_prompt
-                st.info(f"📄 Slide {i}: Standard processing")
+                if not slide_links.empty:
+                    link_text = "\n".join([f"[{row['Link Text']}]({row['URL']})" for _, row in slide_links.iterrows()])
+                    prompt += f"\n\nIMPORTANT: Preserve these hyperlinks:\n{link_text}"
+                    st.info(f"📎 Slide {i}: Processing with {len(slide_links)} hyperlinks")
+                else:
+                    st.info(f"📄 Slide {i}: Standard processing")
 
-            # Process the image
-            markdown_text = self._extract_text_from_image(image, prompt)
+                # Process image
+                markdown_text = self._extract_text_from_image(image, prompt)
 
-            if markdown_text:
-                markdown_sections.append(f"<!-- Slide {i} -->\n\n{markdown_text}")
-            else:
-                markdown_sections.append(f"<!-- Slide {i} -->\n\n*[Could not extract text from this slide]*")
+                if markdown_text:
+                    markdown_sections.append(f"<!-- Slide {i} -->\n\n{markdown_text}")
+                else:
+                    markdown_sections.append(f"<!-- Slide {i} -->\n\n*[Could not extract text from this slide]*")
 
-        # Combine all sections
-        header = f"# {file_path.name}\n\n*AI-enhanced conversion with preserved hyperlinks (Enterprise LLM)*\n\n"
-        return header + "\n\n---\n\n".join(markdown_sections)
+            progress_bar.empty()
+
+            # Combine sections
+            header = f"# {file_path.name}\n\n*AI-enhanced conversion with preserved hyperlinks*\n\n"
+            return header + "\n\n---\n\n".join(markdown_sections)
+
+        except Exception as e:
+            logger.error(f"Error in process_with_hyperlinks: {str(e)}")
+            return f"# Error\n\nFailed to process document: {str(e)}"
 
     def _pdf_to_images(self, pdf_path: Path) -> List[Image.Image]:
         """Convert PDF to images."""
-        return convert_from_path(str(pdf_path), dpi=250, fmt='PNG')
+        try:
+            return convert_from_path(str(pdf_path), dpi=200, fmt='PNG')
+        except Exception as e:
+            logger.error(f"PDF conversion error: {str(e)}")
+            st.error(f"Failed to convert PDF: {str(e)}")
+            return []
 
     def _powerpoint_to_images(self, ppt_path: Path) -> List[Image.Image]:
         """Convert PowerPoint to images."""
@@ -447,14 +418,14 @@ Finally - all this output is going to an .md file so you DO NOT NEED to put ```m
 
         if not libreoffice_path:
             st.error("LibreOffice not found. Please install it first.")
-            st.info("Install with: brew install --cask libreoffice")
+            st.info("Install with: brew install --cask libreoffice (macOS) or apt-get install libreoffice (Linux)")
             return []
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
 
             try:
-                # Convert PowerPoint to PDF using LibreOffice
+                # Convert to PDF first
                 st.info("Converting PowerPoint to PDF...")
                 cmd = [
                     libreoffice_path,
@@ -464,35 +435,24 @@ Finally - all this output is going to an .md file so you DO NOT NEED to put ```m
                     str(ppt_path)
                 ]
 
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
                 if result.returncode != 0:
-                    st.error(f"LibreOffice conversion failed: {result.stderr}")
+                    st.error(f"Conversion failed: {result.stderr}")
                     return []
 
                 # Find generated PDF
                 pdf_files = list(temp_path.glob("*.pdf"))
                 if not pdf_files:
-                    st.error("PDF not generated from PowerPoint")
+                    st.error("PDF not generated")
                     return []
-
-                pdf_path = pdf_files[0]
 
                 # Convert PDF to images
                 st.info("Converting PDF to images...")
-                images = convert_from_path(str(pdf_path), dpi=250, fmt='PNG')
-                return images
+                return convert_from_path(str(pdf_files[0]), dpi=200, fmt='PNG')
 
-            except subprocess.TimeoutExpired:
-                st.error("Conversion timeout - file may be too large")
-                return []
             except Exception as e:
-                st.error(f"Conversion error: {str(e)}")
+                st.error(f"PowerPoint conversion error: {str(e)}")
                 return []
 
     def _extract_text_from_image(self, image: Image.Image, prompt: str) -> str:
@@ -504,317 +464,316 @@ Finally - all this output is going to an .md file so you DO NOT NEED to put ```m
                 new_size = tuple(int(d * ratio) for d in image.size)
                 image = image.resize(new_size, Image.Resampling.LANCZOS)
 
-            # Convert to RGB if needed
-            if image.mode == 'RGBA':
-                background = Image.new('RGB', image.size, (255, 255, 255))
-                background.paste(image, mask=image.split()[3])
-                image = background
-            elif image.mode not in ('RGB', 'L'):
+            # Convert to RGB
+            if image.mode != 'RGB':
                 image = image.convert('RGB')
 
-            # Use Enterprise LLM client
             return self.client.extract_text_from_image(image, prompt)
 
         except Exception as e:
-            st.error(f"Vision processing error: {e}")
+            logger.error(f"Image extraction error: {str(e)}")
             return None
 
 
-def load_enterprise_config():
-    """Load enterprise LLM configuration from files or environment."""
-    jwt_token = None
-    model_url = None
-    config_status = {}
-
-    # Try to load from files first
-    try:
-        if os.path.exists("JWT_token.txt"):
-            with open("JWT_token.txt", "r") as f:
-                jwt_token = f.read().strip()
-                config_status["JWT Token"] = "✅ Loaded from JWT_token.txt"
-        else:
-            config_status["JWT Token"] = "❌ JWT_token.txt not found"
-
-        if os.path.exists("model_url.txt"):
-            with open("model_url.txt", "r") as f:
-                model_url = f.read().strip()
-                config_status["Model URL"] = "✅ Loaded from model_url.txt"
-        else:
-            config_status["Model URL"] = "❌ model_url.txt not found"
-    except Exception as e:
-        st.warning(f"Could not read config files: {e}")
-        config_status["File Error"] = f"⚠️ Error reading files: {e}"
-
-    # Fall back to environment variables
-    if not jwt_token:
-        jwt_token = os.getenv("ENTERPRISE_JWT_TOKEN")
-        if jwt_token:
-            config_status["JWT Token"] = "✅ Loaded from environment variable"
-
-    if not model_url:
-        model_url = os.getenv("ENTERPRISE_MODEL_URL")
-        if model_url:
-            config_status["Model URL"] = "✅ Loaded from environment variable"
-
-    return jwt_token, model_url, config_status
-
-
-def convert_file_enhanced(uploaded_file, use_vision: bool, jwt_token: str, model_url: str):
-    """
-    Enhanced conversion with smart hyperlink handling using Enterprise LLM.
-
-    1. First run XML extractor to get ground truth
-    2. Extract hyperlinks from XML output
-    3. If using vision, process with hyperlink awareness using Enterprise LLM
-    """
-    if not CONVERTER_AVAILABLE:
-        st.error("❌ Converter not available - please check your installation")
-        return
-
-    with st.spinner("🔍 Extracting document structure..."):
-        try:
-            file_data = uploaded_file.getbuffer()
-
-            # Step 1: Run XML extractor to get ground truth
-            st.info("📊 Step 1: Extracting document structure and hyperlinks...")
-            xml_markdown, error = convert_file_to_markdown(
-                file_data,
-                uploaded_file.name,
-                enhance=False,  # Don't use AI enhancement for XML extraction
-                api_key=None
-            )
-
-            if error:
-                st.error(f"XML extraction failed: {error}")
-                return
-
-            st.session_state.xml_markdown = xml_markdown
-
-            # Step 2: Extract hyperlinks from XML output
-            st.info("🔗 Step 2: Building hyperlink table...")
-            hyperlinks = extract_hyperlinks_from_markdown(xml_markdown)
-
-            if hyperlinks:
-                st.session_state.extracted_hyperlinks = hyperlinks
-                hyperlinks_df = pd.DataFrame(hyperlinks)
-                st.success(
-                    f"✅ Found {len(hyperlinks)} hyperlinks across {hyperlinks_df['Slide Number'].nunique()} slides")
-
-                # Show preview of hyperlinks
-                with st.expander("Preview Hyperlink Table"):
-                    st.dataframe(hyperlinks_df, use_container_width=True, hide_index=True)
-            else:
-                st.warning("No hyperlinks found in document")
-                hyperlinks_df = pd.DataFrame()
-                st.session_state.extracted_hyperlinks = []
-
-            # Step 3: Process with vision if requested
-            if use_vision and jwt_token and model_url:
-                if not DOCVISION_AVAILABLE:
-                    st.error("Vision dependencies not installed. Please install: pdf2image, pillow")
-                    return
-
-                st.info("🤖 Step 3: Processing with Enterprise LLM Vision (hyperlink-aware)...")
-
-                # Save uploaded file temporarily
-                with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp_file:
-                    tmp_file.write(file_data)
-                    tmp_path = Path(tmp_file.name)
-
-                try:
-                    # Create enhanced DocVision processor with Enterprise LLM
-                    processor = EnhancedDocVision(jwt_token, model_url)
-
-                    # Test connection first
-                    if not processor.client.test_connection():
-                        st.warning("Enterprise endpoint may be unreachable, but proceeding with conversion...")
-
-                    # Process with hyperlink awareness
-                    vision_markdown = processor.process_with_hyperlinks(tmp_path, hyperlinks_df)
-
-                    st.session_state.markdown_content = vision_markdown
-                    st.session_state.vision_enhanced = True
-                    st.success("✨ Enterprise LLM Vision processing complete with hyperlink preservation!")
-
-                finally:
-                    # Clean up temp file
-                    if tmp_path.exists():
-                        tmp_path.unlink()
-            else:
-                # Use XML extraction result
-                st.session_state.markdown_content = xml_markdown
-                st.session_state.vision_enhanced = False
-                st.success("✅ Converted successfully using XML extraction!")
-
-            st.session_state.file_name = uploaded_file.name
-
-        except Exception as e:
-            st.error(f"Error during conversion: {str(e)}")
-            import traceback
-            st.code(traceback.format_exc())
-
-
-def render_upload():
-    """File upload section."""
-    st.markdown("### 📄 Upload Document")
-
-    uploaded_file = st.file_uploader(
-        "Choose your file",
-        type=['pptx', 'ppt', 'pdf', 'docx', 'doc'],
-        help="Upload a PowerPoint or PDF file",
-        label_visibility="collapsed"
-    )
-
-    return uploaded_file
-
-
-def render_output():
-    """Output display with hyperlink extraction."""
-    if not st.session_state.markdown_content:
-        return
-
-    st.markdown("---")
-    st.markdown("### 📝 Results")
-
-    # Show processing method
-    if st.session_state.vision_enhanced:
-        st.info("🏢 Enhanced with Enterprise LLM Vision + Hyperlink Preservation")
-    else:
-        st.info("📊 Processed with XML Extraction")
-
-    content = st.session_state.markdown_content
-
-    # Quick stats
-    word_count = len(content.split())
-    char_count = len(content)
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Words", f"{word_count:,}")
-    with col2:
-        st.metric("Characters", f"{char_count:,}")
-    with col3:
-        filename = st.session_state.file_name.rsplit(".", 1)[0] + ".md"
-        st.download_button(
-            "📥 Download Markdown",
-            data=content,
-            file_name=filename,
-            mime="text/markdown",
-            use_container_width=True
-        )
-
-    # Content preview
-    st.text_area(
-        "Markdown Content",
-        value=content,
-        height=400,
-        label_visibility="collapsed"
-    )
-
-    # Hyperlink section
-    if st.session_state.extracted_hyperlinks:
-        st.markdown("---")
-        st.markdown("### 🔗 Extracted Hyperlinks")
-
-        df = pd.DataFrame(st.session_state.extracted_hyperlinks)
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Links", len(df))
-        with col2:
-            st.metric("Unique URLs", df['URL'].nunique())
-        with col3:
-            csv = df.to_csv(index=False)
-            base_filename = st.session_state.file_name.rsplit(".", 1)[0]
-            st.download_button(
-                "💾 Download CSV",
-                data=csv,
-                file_name=f"{base_filename}_hyperlinks.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-
-        # Display table
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Link Text": st.column_config.TextColumn("Link Text", width="medium"),
-                "URL": st.column_config.LinkColumn("URL", width="large"),
-                "Slide Number": st.column_config.NumberColumn("Slide", width="small", format="%d")
-            }
-        )
-
-
-def main():
-    """Main application."""
+def setup_page():
+    """Configure the Streamlit page."""
     st.set_page_config(
-        page_title="DocFlow Vision - Enterprise",
+        page_title="DocFlow Vision Enterprise",
         page_icon="🔬",
         layout="centered",
         initial_sidebar_state="collapsed"
     )
 
-    setup_minimal_styling()
-    initialize_session()
+    # Custom CSS
+    st.markdown("""
+    <style>
+    .main {max-width: 900px; margin: 0 auto;}
+    .stButton>button {width: 100%; background-color: #4CAF50; color: white;}
+    .stButton>button:hover {background-color: #45a049;}
+    h1 {text-align: center; color: #2c3e50;}
+    </style>
+    """, unsafe_allow_html=True)
 
-    render_hero()
 
+def initialize_session_state():
+    """Initialize session state variables."""
+    defaults = {
+        "markdown_content": "",
+        "file_name": "",
+        "extracted_hyperlinks": [],
+        "vision_enhanced": False,
+        "connection_tested": False,
+        "connection_success": False
+    }
+
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def load_configuration() -> Tuple[str, str, Dict]:
+    """Load Enterprise LLM configuration."""
+    jwt_token = ""
+    model_url = ""
+    status = {}
+
+    # Try files first
+    if os.path.exists("JWT_token.txt"):
+        try:
+            with open("JWT_token.txt", "r") as f:
+                jwt_token = f.read().strip()
+                status["JWT Token"] = "✅ Loaded from file"
+        except Exception as e:
+            status["JWT Token"] = f"❌ Error reading file: {e}"
+    else:
+        status["JWT Token"] = "❌ JWT_token.txt not found"
+
+    if os.path.exists("model_url.txt"):
+        try:
+            with open("model_url.txt", "r") as f:
+                model_url = f.read().strip()
+                status["Model URL"] = "✅ Loaded from file"
+        except Exception as e:
+            status["Model URL"] = f"❌ Error reading file: {e}"
+    else:
+        status["Model URL"] = "❌ model_url.txt not found"
+
+    # Try environment variables as fallback
+    if not jwt_token:
+        jwt_token = os.getenv("ENTERPRISE_JWT_TOKEN", "")
+        if jwt_token:
+            status["JWT Token"] = "✅ Loaded from environment"
+
+    if not model_url:
+        model_url = os.getenv("ENTERPRISE_MODEL_URL", "")
+        if model_url:
+            status["Model URL"] = "✅ Loaded from environment"
+
+    return jwt_token, model_url, status
+
+
+def extract_hyperlinks(markdown_content: str) -> List[Dict]:
+    """Extract hyperlinks from markdown content."""
+    if not markdown_content:
+        return []
+
+    hyperlinks = []
+    current_slide = 1
+
+    for line in markdown_content.split('\n'):
+        # Track slide numbers
+        if match := re.search(r'<!--\s*Slide\s*(\d+)\s*-->', line):
+            current_slide = int(match.group(1))
+        elif match := re.search(r'^#+\s*Slide\s*(\d+)', line):
+            current_slide = int(match.group(1))
+
+        # Find markdown links
+        for match in re.finditer(r'\[([^\]]+)\]\(([^)]+)\)', line):
+            text = re.sub(r'\*{1,3}', '', match.group(1)).strip()
+            url = match.group(2)
+
+            if not text.startswith('!') and url != "image":
+                hyperlinks.append({
+                    'Link Text': text,
+                    'URL': url,
+                    'Slide Number': current_slide
+                })
+
+    return hyperlinks
+
+
+def process_document(uploaded_file, use_vision: bool, jwt_token: str, model_url: str):
+    """Main document processing function."""
+    if not CONVERTER_AVAILABLE:
+        st.error("❌ Document converter not available. Check installation.")
+        return
+
+    try:
+        file_data = uploaded_file.getbuffer()
+
+        # Step 1: XML Extraction
+        with st.spinner("📊 Extracting document structure..."):
+            xml_markdown, error = convert_file_to_markdown(
+                file_data,
+                uploaded_file.name,
+                enhance=False,
+                api_key=None
+            )
+
+            if error:
+                st.error(f"Extraction failed: {error}")
+                return
+
+            st.session_state.xml_markdown = xml_markdown
+
+        # Step 2: Extract hyperlinks
+        hyperlinks = extract_hyperlinks(xml_markdown)
+        st.session_state.extracted_hyperlinks = hyperlinks
+
+        if hyperlinks:
+            hyperlinks_df = pd.DataFrame(hyperlinks)
+            st.success(f"✅ Found {len(hyperlinks)} hyperlinks")
+        else:
+            hyperlinks_df = pd.DataFrame()
+            st.info("No hyperlinks found")
+
+        # Step 3: Vision processing if requested
+        if use_vision and jwt_token and model_url:
+            if not DOCVISION_AVAILABLE:
+                st.error("❌ Vision dependencies not installed")
+                st.info("Install: pip install pdf2image pillow")
+                st.session_state.markdown_content = xml_markdown
+                st.session_state.vision_enhanced = False
+            else:
+                # Test connection first
+                client = EnterpriseLLMClient(jwt_token, model_url)
+                result = client.test_connection_detailed()
+
+                if not result["success"]:
+                    st.error("❌ **Enterprise LLM Connection Failed**")
+
+                    with st.expander("🔍 Connection Diagnostics", expanded=True):
+                        st.json(result)
+
+                    st.warning("⚠️ Using XML extraction only (connection failed)")
+                    st.session_state.markdown_content = xml_markdown
+                    st.session_state.vision_enhanced = False
+                else:
+                    st.success(f"✅ Connected via {result['method']}")
+
+                    # Process with vision
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(uploaded_file.name).suffix) as tmp:
+                        tmp.write(file_data)
+                        tmp_path = Path(tmp.name)
+
+                    try:
+                        processor = EnhancedDocVision(jwt_token, model_url)
+                        vision_markdown = processor.process_with_hyperlinks(tmp_path, hyperlinks_df)
+
+                        st.session_state.markdown_content = vision_markdown
+                        st.session_state.vision_enhanced = True
+                        st.success("✨ Vision processing complete!")
+                    finally:
+                        if tmp_path.exists():
+                            tmp_path.unlink()
+        else:
+            # Use XML extraction only
+            st.session_state.markdown_content = xml_markdown
+            st.session_state.vision_enhanced = False
+            st.success("✅ Document converted successfully!")
+
+        st.session_state.file_name = uploaded_file.name
+
+    except Exception as e:
+        st.error(f"Processing error: {str(e)}")
+        logger.exception("Processing error")
+
+
+def main():
+    """Main application entry point."""
+    setup_page()
+    initialize_session_state()
+
+    # Header
+    st.title("🔬 DocFlow Vision Enterprise")
+    st.markdown("*AI-powered document conversion with hyperlink preservation*")
     st.markdown("---")
 
-    # Configuration section
-    st.markdown("### ⚙️ Configuration")
+    # Configuration
+    jwt_token, model_url, config_status = load_configuration()
 
-    # Load and display Enterprise LLM configuration status
-    jwt_token, model_url, config_status = load_enterprise_config()
-
-    # Configuration status display
-    with st.expander("🏢 Enterprise LLM Configuration Status", expanded=True):
+    with st.expander("⚙️ Configuration", expanded=not st.session_state.connection_tested):
         for key, status in config_status.items():
-            st.markdown(f"**{status}**")
+            st.markdown(f"{status}")
 
         if jwt_token and model_url:
-            st.success("✅ Enterprise LLM configuration is complete")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔍 Test Connection"):
+                    with st.spinner("Testing..."):
+                        client = EnterpriseLLMClient(jwt_token, model_url)
+                        result = client.test_connection_detailed()
+                        st.session_state.connection_tested = True
+                        st.session_state.connection_success = result["success"]
+
+                        if result["success"]:
+                            st.success(f"✅ Connected via {result['method']}")
+                        else:
+                            st.error("❌ Connection failed")
+                            with st.expander("Details"):
+                                st.json(result)
+
+            with col2:
+                use_vision = st.checkbox(
+                    "🤖 Use Vision Processing",
+                    value=st.session_state.connection_success,
+                    disabled=not st.session_state.connection_success
+                )
         else:
-            st.error("❌ Enterprise LLM configuration incomplete")
+            st.error("❌ Configuration incomplete")
             st.markdown("""
             **Required files:**
-            - `JWT_token.txt` (containing your JWT authentication token)
-            - `model_url.txt` (containing the Enterprise LLM endpoint URL)
-
-            **Alternative:** Set environment variables:
-            - `ENTERPRISE_JWT_TOKEN`
-            - `ENTERPRISE_MODEL_URL`
+            - `JWT_token.txt` - Your JWT token
+            - `model_url.txt` - Enterprise LLM endpoint URL
             """)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        use_vision = st.checkbox(
-            "🤖 Use Enterprise Vision Processing",
-            value=bool(jwt_token and model_url),
-            disabled=not (jwt_token and model_url),
-            help="Process document images with Enterprise LLM Vision API for better formatting"
-        )
-
-    with col2:
-        if not (jwt_token and model_url):
-            st.warning("⚠️ Enterprise LLM credentials required for vision processing")
+            use_vision = False
 
     st.markdown("---")
 
     # File upload
-    uploaded_file = render_upload()
+    uploaded_file = st.file_uploader(
+        "Upload Document",
+        type=['pptx', 'ppt', 'pdf', 'docx', 'doc'],
+        help="Upload a PowerPoint, PDF, or Word document"
+    )
 
     if uploaded_file:
-        st.markdown(f"**Selected:** {uploaded_file.name} ({uploaded_file.size:,} bytes)")
+        st.info(f"📄 {uploaded_file.name} ({uploaded_file.size:,} bytes)")
 
         if st.button("🚀 Convert to Markdown", type="primary"):
-            convert_file_enhanced(uploaded_file, use_vision, jwt_token, model_url)
+            process_document(uploaded_file, use_vision, jwt_token, model_url)
 
-    # Show output
-    render_output()
+    # Display results
+    if st.session_state.markdown_content:
+        st.markdown("---")
+        st.markdown("### 📝 Results")
+
+        if st.session_state.vision_enhanced:
+            st.success("Enhanced with Enterprise LLM Vision")
+        else:
+            st.info("Processed with XML extraction")
+
+        # Download button
+        st.download_button(
+            "📥 Download Markdown",
+            data=st.session_state.markdown_content,
+            file_name=f"{Path(st.session_state.file_name).stem}.md",
+            mime="text/markdown"
+        )
+
+        # Preview
+        with st.expander("Preview Markdown"):
+            st.text_area(
+                "Content",
+                value=st.session_state.markdown_content,
+                height=400,
+                label_visibility="collapsed"
+            )
+
+        # Hyperlinks table
+        if st.session_state.extracted_hyperlinks:
+            st.markdown("### 🔗 Extracted Hyperlinks")
+            df = pd.DataFrame(st.session_state.extracted_hyperlinks)
+
+            csv = df.to_csv(index=False)
+            st.download_button(
+                "💾 Download Hyperlinks CSV",
+                data=csv,
+                file_name=f"{Path(st.session_state.file_name).stem}_hyperlinks.csv",
+                mime="text/csv"
+            )
+
+            st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 if __name__ == "__main__":
