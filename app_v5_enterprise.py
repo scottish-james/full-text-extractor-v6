@@ -88,7 +88,8 @@ class EnterpriseLLMClient:
             "suggestions": [],
             "timestamp": datetime.now().isoformat(),
             "url": self.model_url,
-            "headers_sent": {k: v[:20] + "..." if len(v) > 20 else v for k, v in self.headers.items()}
+            "headers_sent": {k: v[:20] + "..." if len(v) > 20 else v for k, v in self.headers.items()},
+            "supports_images": False
         }
 
         # First validate configuration
@@ -99,7 +100,59 @@ class EnterpriseLLMClient:
             result["suggestions"] = config_errors
             return result
 
-        # Test methods in order of preference
+        # Test with a minimal image payload to check image support
+        try:
+            # Create a tiny test image
+            test_image = Image.new('RGB', (10, 10), color='white')
+            buffer = BytesIO()
+            test_image.save(buffer, format='PNG')
+            buffer.seek(0)
+            test_image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+            # Test with OpenAI-style image format
+            test_payload = {
+                "messages": [
+                    {"role": "system", "content": "Test"},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Test"},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{test_image_b64}"}}
+                        ]
+                    }
+                ],
+                "max_tokens": 1,
+                "temperature": 0
+            }
+
+            response = requests.post(
+                self.model_url,
+                headers=self.headers,
+                json=test_payload,
+                timeout=15
+            )
+
+            if response.status_code < 400:
+                result["success"] = True
+                result["method"] = "POST with image"
+                result["status_code"] = response.status_code
+                result["supports_images"] = True
+                return result
+            else:
+                result["status_code"] = response.status_code
+                result["error"] = f"Image test failed: {response.text[:500]}"
+                result["error_type"] = self._classify_error(response.status_code)
+                result["suggestions"] = self._get_suggestions(response.status_code, response.text)
+
+                # If it's a 400 error, might be wrong image format
+                if response.status_code == 400:
+                    result["suggestions"].insert(0, "The API doesn't accept the OpenAI image format")
+                    result["suggestions"].append("Contact your API provider for the correct image payload format")
+
+        except Exception as e:
+            logger.debug(f"Image test failed: {str(e)}")
+
+        # Test methods without images
         test_methods = [
             ("POST", self._test_post_request),
             ("GET", self._test_get_request),
@@ -114,6 +167,7 @@ class EnterpriseLLMClient:
                     result["success"] = True
                     result["method"] = method_name
                     result["status_code"] = status_code
+                    result["supports_images"] = False  # These tests don't verify image support
                     return result
                 else:
                     # Store the best error we've seen
@@ -778,3 +832,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
